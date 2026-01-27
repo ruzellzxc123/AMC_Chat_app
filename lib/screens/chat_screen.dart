@@ -2,22 +2,31 @@ import 'package:flutter/material.dart';
 import '../models/chat_message.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/input_bar.dart';
-import '../services/gemini_service.dart';
+import '../services/gemini_service.dart';  // ← NEW
 
 class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
   @override
-  _ChatScreenState createState() => _ChatScreenState();
+  State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> {
   final List<ChatMessage> messages = [];
   final ScrollController scrollController = ScrollController();
+  bool _isLoading = false;
 
-  void addMessage(String text, bool isUser) {
+  @override
+  void dispose() {
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void addMessage(String text, String role) {
     setState(() {
       messages.add(ChatMessage(
         text: text,
-        isUserMessage: isUser,
+        role: role,  // "user" or "model"
         timestamp: DateTime.now(),
       ));
     });
@@ -29,90 +38,85 @@ class _ChatScreenState extends State<ChatScreen> {
       if (scrollController.hasClients) {
         scrollController.animateTo(
           scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       }
     });
   }
 
+  // 🔥 MULTI-TURN HANDLER
   Future<void> handleSend(String text) async {
-    addMessage(text, true);
+    // Add user message
+    addMessage(text, "user");
 
-    addMessage('🤖 AI Thinking...', false);
+    setState(() => _isLoading = true);
 
     try {
-      final aiResponse = await GeminiService.sendMessage(text);
-      setState(() {
-        messages.removeLast();
-      });
-      addMessage(aiResponse, false);
-    } catch (e) {
-      setState(() {
-        messages.removeLast();
-      });
-      addMessage('❌ Error: $e', false);
-    }
-  }
+      // 🔥 SEND ENTIRE HISTORY TO GEMINI
+      final aiResponse = await GeminiService.sendMultiTurnMessage(
+        messages,  // ← Entire conversation!
+      );
 
-  @override
-  void dispose() {
-    scrollController.dispose();
-    super.dispose();
+      // Add AI response
+      addMessage(aiResponse, "model");  // ← role: "model"
+    } catch (e) {
+      addMessage('❌ Error: $e', "model");
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black, // Set background to black
       appBar: AppBar(
-        backgroundColor: Colors.black, // AppBar background black
-        elevation: 0,
-        centerTitle: true, // Center the title text
-
-        // 1. ADD THE LOGO HERE
-        leading: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: CircleAvatar(
-            backgroundColor: Colors.white24,
-            child: Icon(Icons.bolt, color: Colors.blueAccent), // You can replace this Icon with an Image.asset
-          ),
-        ),
-
-        title: Text(
-          'Zell UI ✅',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-
-        // Optional: Add a profile or settings icon on the right
-        actions: [
-          IconButton(
-            icon: Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () {},
-          ),
-        ],
+        title: const Text('🤖 AI Chat - Multi-Turn Week 4'),
+        backgroundColor: Colors.teal[600],
       ),
       body: Column(
         children: [
+          // Messages
           Expanded(
             child: messages.isEmpty
-                ? Center(
-              child: Text(
-                'Send message to start!',
-                style: TextStyle(color: Colors.white70),
+                ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.chat, size: 100, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text('Start chatting!'),
+                  Text(
+                    'Multi-turn means Gemini remembers context 🧠',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
               ),
             )
                 : ListView.builder(
               controller: scrollController,
-              reverse: true,
               itemCount: messages.length,
               itemBuilder: (context, index) {
-                return MessageBubble(
-                  message: messages[messages.length - 1 - index],
-                );
+                final msg = messages[index];
+                return MessageBubble(message: msg);
               },
             ),
           ),
+
+          // Loading
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(width: 12),
+                  Text('🤖 Thinking with context...'),
+                ],
+              ),
+            ),
+
+          // Input
           InputBar(onSendMessage: handleSend),
         ],
       ),
